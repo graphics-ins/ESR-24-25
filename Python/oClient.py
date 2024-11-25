@@ -64,6 +64,9 @@ class Client:
                 response = f"HELLO {client_address[0]}"
                 server_socket.sendto(response.encode(), client_address)
                 print(f"Resposta enviada para {client_address}")
+            
+            if message.decode().startswith("STREAM:"):
+                print("Hello there")
             else:
                 print("Mensagem recebida não é a esperada, aguardando nova mensagem.")
 
@@ -73,53 +76,43 @@ class Client:
         videofile = sys.argv[1]
         # Enviar a mensagem HELLO
         try:
-            while True:
-                # Enviar a mensagem para o servidor
-                message = "CLIENT"
-                client_socket.sendto(message.encode(), (host, port))
-                print("Mensagem enviada.")
+            
+            # Enviar a mensagem para o servidor
+            message = "CLIENT"
+            client_socket.sendto(message.encode(), (host, port))
+            print("Mensagem enviada.")
 
-                # Receber a resposta do servidor
-                client_socket.settimeout(1)  # Timeout para evitar bloqueio indefinido
-                try:
-                    response, server_address = client_socket.recvfrom(1024)
-                    #print(f"Resposta do servidor: {response.decode()}")
-                    ips = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', response.decode())
-                    print(ips)
-                    threads = []
-                    for ip in ips:
-                        thread = threading.Thread(target=Client.open_socket_client,args=(ip,))
-                        thread.start()
-                        threads.append(thread)
+            # Receber a resposta do servidor
+            client_socket.settimeout(1)  # Timeout para evitar bloqueio indefinido
+            try:
+                response, server_address = client_socket.recvfrom(1024)
+                #print(f"Resposta do servidor: {response.decode()}")
+                ips = re.findall(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', response.decode())
+                print(ips)
+                threads = []
+                for ip in ips:
+                    thread = threading.Thread(target=Client.open_socket_client,args=(ip,))
+                    thread.start()
+                    threads.append(thread)
                     
-                    for thread in threads:
-                        thread.join()
+                for thread in threads:
+                    thread.join()
                     
-                    if Client.best_ip is not None:
-                        result_message = f"Best IP: {Client.best_ip}"
-                        client_socket.sendto(result_message.encode(), (host, port))
-                        print(f"Sent best IP and time to server: {result_message}")
-
-                        response, server_address = client_socket.recvfrom(1024)
-                        print(f"Resposta do servidor: {response.decode()}")
-                        response3 = ast.literal_eval(response.decode())
-                        # Remove the last element of the list
-                        response3.pop()
-
-                        request = f"REQ:{host}:{port},{videofile},{response3}"
-                        s1 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                        s1.sendto(request.encode(), (Client.best_ip, 24000))
+                if Client.best_ip is not None:
+                    request = f"REQ:{host}:{port},{videofile}"
+                    s1 = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                    s1.sendto(request.encode(), (Client.best_ip, 24000))
 
 
 
                     
 
 
-                except socket.timeout:
-                    print("Nenhuma resposta recebida do servidor.")
+            except socket.timeout:
+                print("Nenhuma resposta recebida do servidor.")
 
-                # Aguarda um tempo antes de enviar a próxima mensagem
-                time.sleep(1)  # Tempo de espera entre mensagens (em segundos)
+            # Aguarda um tempo antes de enviar a próxima mensagem
+            time.sleep(1)  # Tempo de espera entre mensagens (em segundos)
 
         except KeyboardInterrupt:
             print("\nCliente interrompido pelo usuário.")
