@@ -5,6 +5,10 @@ import time
 import re
 import ast
 
+
+streams = {}
+neighbor_ips = []
+
 def open_socket(client_socket,ip):
     try:
         s=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
@@ -33,8 +37,8 @@ def open_socket(client_socket,ip):
 
         except socket.timeout:
             print(f"No response received from {ip}:24000")
-            response_message2 = f"DIED :{ip}".encode()
-            client_socket.sendto(response_message2,(HOST,PORT))
+            #response_message2 = f"DIED :{ip}".encode()
+            #client_socket.sendto(response_message2,(HOST,PORT))
 
         s.close()
     
@@ -73,15 +77,20 @@ def client(host, port):
             # Enviar a mensagem para o servidor
             message = "HELLO :ID_NODO"
             client_socket.sendto(message.encode(), (host, port))
-            print(f"Mensagem enviada para {host} {port}")
+            #print(f"Mensagem enviada para {host} {port}")
             
             # Receber a resposta do servidor
             client_socket.settimeout(1)  # Timeout para evitar bloqueio indefinido
             try:
                 response, server_address = client_socket.recvfrom(1024)
                 print(f"Resposta do servidor: {response.decode()}")
-                ips = re.findall(r'\d+\.\d+\.\d+\.\d+', response.decode())
+                received_message = response.decode()
+                ip_pattern = r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
+
+                # Extract all IP addresses from the response message
+                ips = re.findall(ip_pattern, response.decode())
                 print(ips)
+                neighbor_ips = ips
                 threads = []
                 for ip in ips:
                     thread = threading.Thread(target=open_socket,args=(client_socket,ip,))
@@ -111,6 +120,7 @@ def server(host, port):
     while True:
         # Escuta por mensagens de qualquer cliente
         message, client_address = server_socket.recvfrom(1024)
+        client_ip = client_address[0]
         print(f"Recebido de {client_address}: {message.decode()}")
         
         # Verifica se a mensagem recebida é "HELLO"
@@ -118,30 +128,45 @@ def server(host, port):
             # Envia uma resposta de volta para o cliente
             response = f"HELLO {client_address[0]}"
             server_socket.sendto(response.encode(), client_address)
-            print(f"Resposta enviada para {client_address}")
+            #print(f"Resposta enviada para {client_address}")
 
         if message.decode().startswith("REQ:"):
-            print("Hello")
             request = message.decode()
             # Remover o prefixo 'REQ:' e dividir o restante da string
-            pattern = r"REQ:(?P<host>[^:]+):(?P<port>\d+),(?P<videofile>[^,]+),(?P<response>\[.*\])"
+            videofile = request.split(",")[1]
+            server_request = f"REQ: {videofile},{client_ip}"
+            print(f"Video file: {videofile}, {client_ip}")
 
-            match = re.match(pattern, request)
+            server_socket.sendto(server_request.encode(),(HOST, PORT))
+            # Exibir os valores extraídos
 
+        if message.decode().startswith("STREAM:"):
+            request = message.decode()
+            #path2_str = request.split("bruh, ")[1].strip()
+            match = re.match(r"STREAM:\s*([\d\.]+),bruh,\s*(.*)", request)
             if match:
-                host = match.group('host')
-                port = match.group('port')
-                videofile = match.group('videofile')
-                response = match.group('response')
-
-                # Exibir os valores extraídos
-                print(f"Host: {host}")
-                print(f"Port: {port}")
-                print(f"Video file: {videofile}")
-                print(f"Response: {response}")
-
+                client_ip2 = match.group(1)  # First captured group
+                path2_str = match.group(2)   # Second captured group
+                # Convert path2 string to tuple
+                path2 = eval(path2_str)  # Use eval only if you're certain of safe input
+                # Output the results
+                print("Extracted client_ip2:", client_ip2)
+                print("Extracted path2:", path2)
             else:
-                print("A string não corresponde ao padrão esperado.")
+                print("No match found")
+            print(path2_str)
+            path2 = ast.literal_eval(path2_str)
+
+            if not path2:
+                response_message_client = f"STREAM: video"
+                server_socket.sendto(response_message_client.encode(),(client_ip2,24000))
+            else:
+                path2first = path2[0]
+                next = path2first[1]
+                path2 = path2[1:]
+                print(next)
+                response_message2 = f"STREAM: {client_ip2},bruh, {path2}"
+                server_socket.sendto(response_message2.encode(), (next, 24000))
         else:
             print("Mensagem recebida não é a esperada, aguardando nova mensagem.")
 
