@@ -13,6 +13,7 @@ class Server:
         self.points_presence = ['10.0.8.2,10.0.9.2,10.0.11.2']
         self.graph = nx.DiGraph()
         self.ip_to_node = {}
+        self.node_to_ips = {}
 
     
     def main(self):
@@ -106,20 +107,59 @@ class Server:
         except nx.NetworkXNoPath:
             print(f"No path found between {start_node} and {end_node}")
             return None, None
+        
+    def find_shortest_path_with_ips(self, start_node, end_node):
+        """
+        Finds the shortest path between two nodes and returns it as a list of connections by IP addresses.
+        """
+        try:
+            # Find the shortest path using Dijkstra's algorithm
+            node_path = nx.dijkstra_path(self.graph, source=start_node, target=end_node, weight='weight')
+            total_time = nx.dijkstra_path_length(self.graph, source=start_node, target=end_node, weight='weight')
+            
+            # Convert the path of nodes to a path of IP addresses
+            ip_path = []
+            for i in range(len(node_path) - 1):
+                origin_node = node_path[i]
+                dest_node = node_path[i + 1]
+                
+                # Find the connection in the log that matches the nodes
+                for record in self.connection_data_log:
+                    if record["origin_node"] == origin_node and record["dest_node"] == dest_node:
+                        ip_path.append((record["origin"], record["dest"]))
+                        break
+            
+            print(f"Shortest path (IPs) from {start_node} to {end_node}: {ip_path}")
+            print(f"Total time for the path: {total_time}")
+            return ip_path, total_time
+        except nx.NetworkXNoPath:
+            print(f"No path found between {start_node} and {end_node}")
+            return None, None
+        
+    def find_parents_by_ip(self, target_node):
+        """
+        Finds the parents of a specific node and returns their IP addresses.
+        """
+        # List to store the parent IPs
+        parent_ips = []
 
-    def visualize_graph(self):
-            """Visualizes the graph using matplotlib."""
-            
-            pos = nx.spring_layout(self.graph)  # Use spring layout for better visualization
-            plt.figure(figsize=(10, 8))
-            
-            # Draw the graph with node labels and edge weights
-            nx.draw(self.graph, pos, with_labels=True, node_size=2000, node_color='lightblue', font_size=10, font_weight='bold')
-            edge_labels = nx.get_edge_attributes(self.graph, 'weight')
-            nx.draw_networkx_edge_labels(self.graph, pos, edge_labels=edge_labels)
-            
-            plt.title("Network Graph")
-            plt.show()
+        # Iterate through the connection data log to find edges leading to the target node
+        for record in self.connection_data_log:
+            if record["dest_node"] == target_node:
+                # Add the IP of the origin node (parent)
+                parent_ips.append(record["origin"])
+
+        if parent_ips:
+            print(f"Parents of node {target_node} (IPs): {parent_ips}")
+        else:
+            print(f"No parents found for node {target_node}.")
+        
+        return parent_ips
+
+        
+
+
+
 
     def rtspSocket(self):
         try:
@@ -135,7 +175,9 @@ class Server:
         while True:
             clientInfo = {}
             clientInfo['rtspSocket'] = rtspSocket.accept()
-            ServerWorker(clientInfo).run()		
+            ServerWorker(clientInfo).run()	
+
+	
                 
     def bootstrapper(self):
         """Bootstrapper function to read interfaces and neighbors from config.txt."""
@@ -152,6 +194,9 @@ class Server:
         print(f"Esperando mensagem")
         groups = self.load_config(config_file)
         self.load_config2(config_file)
+        ip_addresses = self.points_presence[0].split(',')
+
+            
         
         # Verifica se o arquivo foi lido corretamente
         if not groups:
@@ -164,6 +209,7 @@ class Server:
                 self.build_graph_from_connections()
                 data, addr = sock.recvfrom(1024)
                 message = data.decode('utf-8').strip()
+                
                 
                 # Extrair o IP do cliente
                 client_ip = addr[0]
@@ -199,6 +245,37 @@ class Server:
                     
                     self.save_connection_data(ip, client_ip,round_trip_time)
 
+
+                if message.startswith("REQ:"):
+                    node = self.get_node_by_ip(client_ip)
+                    node_host = self.get_node_by_ip('10.0.17.10')
+                    start_node = node_host
+                    end_node = node
+                    if start_node in self.graph.nodes and end_node in self.graph.nodes:
+                        path, total_time = self.find_shortest_path(start_node, end_node)
+                        path2, total_time2 = self.find_shortest_path_with_ips(start_node,end_node)
+                        print(f"Path: {path} \n Time: {total_time}")
+                        print(f"Path: {path2} \n Time: {total_time2}")
+
+                        content = message.split("REQ: ")[1].strip()
+                        videofile, client_ip2 = content.split(",")
+
+
+
+                        path = path[1:]  # Remove the first element
+                        path2first = path2[0]
+                        next = path2first[1]
+                        print(next)
+                        path2 = path2[1:]
+                        response_message2 = f"STREAM: {client_ip2}, bruh, {path2}"
+                        sock.sendto(response_message2.encode(), (next, 24000))
+                    else:
+                        print(f"One of the nodes ({start_node}, {end_node}) does not exist in the graph.")
+
+                    #response_message_client= f"{path}"
+                    #sock.sendto(response_message_client.encode(),addr)
+
+
                 
                 if message == ("CLIENT"):
                     print(f"Mensagem recebida de Cliente {client_ip}")
@@ -206,6 +283,8 @@ class Server:
                     print(extracted_ips)
                     for ip in extracted_ips:
                         node_ip = self.get_node_by_ip(ip)
+                        node_ips = self.get_ips_per_node(node_ip)
+                        print(node_ips)
                     response_message = f"Pontos de Presenca: {self.points_presence}"
                     sock.sendto(response_message.encode(), addr)
 
@@ -226,10 +305,17 @@ class Server:
                     # Verifica se o IP está no grupo da esquerda
                     for left_ips, right_ips in groups.items():
                         if client_ip in left_ips:
-                            # Envia o grupo da direita de volta como resposta
-                            response_message = f"Vizinhos: {', '.join(right_ips)}"
+                            neighbors = []
+                            for ip in right_ips:
+                                node = self.get_node_by_ip(ip)  # Get the node associated with the IP
+                                if node:
+                                    neighbors.append(f"{ip} (Node {node})")
+                                else:
+                                    neighbors.append(f"{ip} (Unknown Node)")
+
+                            response_message = f"Vizinhos: {', '.join(neighbors)}"
                             sock.sendto(response_message.encode(), addr)
-                            break  # Envia uma vez e sai do loop, caso o IP tenha sido encontrado
+                            break  # Send the response once and exit the loop
                     else:
                         print(f"IP {client_ip} não está em nenhum nodo")
                         
@@ -294,20 +380,35 @@ class Server:
                         left_ips = [ip.strip() for ip in left_ips]
                         right_ips = [ip.strip() for ip in right_ips]
                         
-                        # Map the IPs to the respective node number
+                        # Map the IPs to the respective node number in ip_to_node
                         for ip in left_ips:
                             self.ip_to_node[ip] = node_number
+                        
+                        # Add IPs to the node_to_ips dictionary (node -> IPs)
+                        if node_number not in self.node_to_ips:
+                            self.node_to_ips[node_number] = []
+                        
+                        # Add both left and right IPs to the node's IP list
+                        self.node_to_ips[node_number].extend(left_ips)
+                        
                     else:
-                        print(f"Erro: Formato inválido na linha: {line}")
+                        print(f"Error: Invalid format in line: {line}")
         except Exception as e:
-            print(f"Erro ao ler o arquivo de configuração: {e}")
+            print(f"Error reading configuration file: {e}")
 
     def get_node_by_ip(self, ip):
+        """Returns the node associated with the provided IP."""
         node = self.ip_to_node.get(ip, None)
         if node is None:
             print(f"Warning: IP {ip} not found in ip_to_node mapping")
         return node
 
+    def get_ips_per_node(self, node):
+        """Returns all IP addresses associated with a given node."""
+        ips = self.node_to_ips.get(node, None)
+        if ips is None:
+            print(f"Warning: No IPs found for node {node}")
+        return ips
 
 
 
