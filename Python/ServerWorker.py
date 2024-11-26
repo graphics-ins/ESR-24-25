@@ -43,6 +43,9 @@ class ServerWorker:
             if data:
                 print("Data received:\n" + data.decode("utf-8"))
                 self.processRtspRequest(data.decode("utf-8"))
+            else:
+                break
+        connSocket.close()
 
     
     def processRtspRequest(self, data):
